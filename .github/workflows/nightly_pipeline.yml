@@ -6,6 +6,10 @@ on:
     - cron: "0 2 * * *"
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
+concurrency:
+  group: nightly-pipeline
+  cancel-in-progress: false
+  
 jobs:
   run-pipeline:
     name: Fetch, Match & Save Market Data
@@ -55,8 +59,13 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/kalshi_poly_df.parquet data/kalshi_poly_df.json || true
-          git diff --cached --quiet && echo "No changes to commit" || git commit -m "🤖 nightly data update [$(date -u +'%Y-%m-%d %H:%M UTC')]"
-          git pull --rebase origin main
-          git push
+          git diff --cached --quiet && echo "No changes to commit" || {
+            git commit -m "🤖 nightly data update [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+            git pull --rebase origin main
+            git push
+          }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
