@@ -51,9 +51,11 @@ jobs:
       #       poly_df and df_kalshi_filtered are too large for git (100 MB limit).
       #       They are available via the Artifact above.
       - name: 📝 Commit & push kalshi_poly_df to repo
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-         commit_message: "🤖 nightly data update [$(date -u +'%Y-%m-%d %H:%M UTC')]"
-         file_pattern: 'data/kalshi_poly_df.parquet data/kalshi_poly_df.json'
-         commit_user_name: github-actions[bot]
-         commit_user_email: github-actions[bot]@users.noreply.github.com
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/kalshi_poly_df.parquet data/kalshi_poly_df.json || true
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "🤖 nightly data update [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
