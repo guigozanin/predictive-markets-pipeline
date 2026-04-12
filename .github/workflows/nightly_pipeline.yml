@@ -10,7 +10,7 @@ jobs:
   run-pipeline:
     name: Fetch, Match & Save Market Data
     runs-on: ubuntu-latest
-    timeout-minutes: 90        # Kalshi can be slow; give it plenty of time
+    timeout-minutes: 180        # Kalshi can be slow; give it plenty of time
 
     permissions:
       contents: write            # Needed to push data files back to the repo
