@@ -30,6 +30,13 @@ LIMIT = 100
 DELAY = 0.5
 MAX_RETRIES = 3
 
+# Columns to keep in poly_df when saving to disk (avoids 300MB+ files).
+# The full object is still used in-memory for matching.
+POLY_SLIM_COLS = [
+    "id", "title", "description", "endDate", "startDate",
+    "volume", "liquidity", "active", "closed", "category", "tags",
+]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,8 +57,14 @@ def save(df: pd.DataFrame, name: str):
     # JSON: use records orientation for readability
     df.to_json(json_path, orient="records", indent=2, date_format="iso")
 
-    print(f"  💾 {name}.parquet  ({os.path.getsize(parquet_path) // 1024} KB)")
-    print(f"  💾 {name}.json     ({os.path.getsize(json_path) // 1024} KB)")
+    print(f"  💾 {name}.parquet  ({os.path.getsize(parquet_path) / 1024 / 1024:.1f} MB)")
+    print(f"  💾 {name}.json     ({os.path.getsize(json_path) / 1024 / 1024:.1f} MB)")
+
+
+def save_slim(df: pd.DataFrame, name: str, keep_cols: list):
+    """Save only a subset of columns to keep file size small for git."""
+    available = [c for c in keep_cols if c in df.columns]
+    save(df[available], name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,7 +276,9 @@ def main():
 
     # 2. Save raw data
     print("\n💾 Saving raw data...")
-    save(poly_df,            "poly_df")
+    # poly_df can be 300+ MB with the nested 'markets' column — save a slim version.
+    # The full DataFrame is still used in-memory for matching.
+    save_slim(poly_df, "poly_df", POLY_SLIM_COLS)
     save(df_kalshi_filtered, "df_kalshi_filtered")
 
     # 3. Match markets

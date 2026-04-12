@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 .env
 
+# Large data files — tracked only via GitHub Actions Artifacts
+# Only kalshi_poly_df (the final merged result) is committed to git.
+data/poly_df.parquet
+data/poly_df.json
+data/df_kalshi_filtered.parquet
+data/df_kalshi_filtered.json
+
