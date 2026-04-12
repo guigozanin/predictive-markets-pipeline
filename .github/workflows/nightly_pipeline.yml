@@ -1,0 +1,57 @@
+name: Nightly Predictive Markets Pipeline
+
+on:
+  schedule:
+    # Runs every night at 02:00 UTC (23:00 BRT)
+    - cron: "0 2 * * *"
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  run-pipeline:
+    name: Fetch, Match & Save Market Data
+    runs-on: ubuntu-latest
+    timeout-minutes: 90        # Kalshi can be slow; give it plenty of time
+
+    steps:
+      # ── 1. Checkout repo ────────────────────────────────────────────────────
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ────────────────────────────────────────────────────
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ─────────────────────────────────────────────
+      - name: 📦 Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Run pipeline ─────────────────────────────────────────────────────
+      - name: 🚀 Run pipeline
+        run: python pipeline.py
+
+      # ── 5. Upload data as GitHub Actions Artifact ────────────────────────────
+      #       Retention: 90 days. Download from the Actions tab in GitHub.
+      - name: 📤 Upload data artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-${{ github.run_number }}-${{ github.run_id }}
+          path: data/
+          retention-days: 90
+
+      # ── 6. Commit & push data files back to the repo ─────────────────────────
+      #       So the latest data is always available in the `data/` folder.
+      - name: 📝 Commit & push updated data to repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          # Only commit if there are actual changes
+          git diff --cached --quiet || git commit -m "🤖 nightly data update [$(date -u +'%Y-%m-%d %H:%M UTC')]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
