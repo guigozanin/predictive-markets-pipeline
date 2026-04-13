@@ -39,6 +39,7 @@ jobs:
 
       # ── 4. Run pipeline ─────────────────────────────────────────────────────
       - name: 🚀 Run pipeline
+        timeout-minutes: 175
         run: python pipeline.py
 
       # ── 5. Upload ALL data as GitHub Actions Artifact ───────────────────────
