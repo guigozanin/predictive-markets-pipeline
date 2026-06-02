@@ -2,50 +2,43 @@ name: Nightly Predictive Markets Pipeline
 
 on:
   schedule:
-    # Runs every night at 02:00 UTC (23:00 BRT)
     - cron: "0 2 * * *"
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
 
 concurrency:
   group: nightly-pipeline
   cancel-in-progress: false
-  
+
 jobs:
   run-pipeline:
     name: Fetch, Match & Save Market Data
     runs-on: ubuntu-latest
-    timeout-minutes: 180        # Kalshi can be slow; give it plenty of time
+    timeout-minutes: 180
 
     permissions:
-      contents: write            # Needed to push data files back to the repo
+      contents: write
 
     steps:
-      # ── 1. Checkout repo ────────────────────────────────────────────────────
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      # ── 2. Set up Python ────────────────────────────────────────────────────
       - name: 🐍 Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3. Install dependencies ─────────────────────────────────────────────
       - name: 📦 Install dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4. Run pipeline ─────────────────────────────────────────────────────
       - name: 🚀 Run pipeline
         timeout-minutes: 175
-        run: python pipeline.py
+        run: python -u pipeline.py
 
-      # ── 5. Upload ALL data as GitHub Actions Artifact ───────────────────────
-      #       Retention: 90 days. Download from the Actions tab in GitHub.
-      #       This includes the large poly_df and df_kalshi_filtered files.
       - name: 📤 Upload data artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: market-data-${{ github.run_number }}-${{ github.run_id }}
