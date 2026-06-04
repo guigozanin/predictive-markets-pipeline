@@ -117,22 +117,30 @@ def fetch_kalshi() -> pd.DataFrame:
     all_events = []
     page_size = 200
 
-    resp = requests.get(
-        f"{KALSHI_BASE_URL}?limit={page_size}&with_nested_markets=true",
-        timeout=60
-    )
-    data = resp.json()
+    def kalshi_get(url: str) -> dict:
+        """GET a Kalshi URL with retries, returning parsed JSON."""
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = requests.get(url, timeout=60)
+                resp.raise_for_status()
+                if not resp.text:
+                    raise ValueError("Empty response body")
+                return resp.json()
+            except (requests.exceptions.RequestException, ValueError) as err:
+                print(f"  ⚠️  Attempt {attempt + 1}/{MAX_RETRIES}: {err}. Retrying in 5s...")
+                time.sleep(5)
+        print("  🛑 Kalshi: giving up after retries.")
+        return {}
+
+    data = kalshi_get(f"{KALSHI_BASE_URL}?limit={page_size}&with_nested_markets=true")
     all_events.extend(data.get("events", []))
 
     while data.get("cursor"):
-        resp = requests.get(
-            f"{KALSHI_BASE_URL}?cursor={data['cursor']}&limit={page_size}&with_nested_markets=true",
-            timeout=60
+        time.sleep(DELAY)
+        data = kalshi_get(
+            f"{KALSHI_BASE_URL}?cursor={data['cursor']}&limit={page_size}&with_nested_markets=true"
         )
-        data = resp.json()
         all_events.extend(data.get("events", []))
-
-    print(f"  ✅ Kalshi: {len(all_events)} events fetched.")
 
     # Flatten nested markets
     data_rows = []
