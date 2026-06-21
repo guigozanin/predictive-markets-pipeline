@@ -114,8 +114,6 @@ def _fetch_polymarket_page(offset: int) -> list | None:
                 continue
             raise
 
-    return None  # exhausted retries
-
 
 def fetch_polymarket() -> pd.DataFrame:
     print("\n📡 Fetching Polymarket data...")
@@ -333,6 +331,9 @@ def main():
         df_kalshi_filtered = fetch_kalshi()
     except Exception as e:
         raise RuntimeError(f"🛑 Kalshi fetch failed, aborting pipeline: {e}") from e
+
+    if df_kalshi_filtered.empty:
+        raise RuntimeError("🛑 Kalshi returned 0 active markets — aborting pipeline.")
 
     # 2. Save raw data
     print("\n💾 Saving raw data...")
