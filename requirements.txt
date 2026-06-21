@@ -3,4 +3,5 @@ requests>=2.31.0
 sentence-transformers>=2.7.0
 numpy>=1.26.0
 pyarrow>=14.0.0
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.0.0
