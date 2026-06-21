@@ -29,6 +29,7 @@ KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2/events"
 LIMIT = 100
 DELAY = 0.5
 MAX_RETRIES = 3
+KALSHI_MAX_PAGES = 50   # 50 × 200 = 10 000 eventos max → evita runner timeout
 
 # Columns to keep in poly_df when saving to disk (avoids 300MB+ files).
 # The full object is still used in-memory for matching.
@@ -71,40 +72,74 @@ def save_slim(df: pd.DataFrame, name: str, keep_cols: list):
 # 1. POLYMARKET
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_polymarket() -> pd.DataFrame:
-    print("\n📡 Fetching Polymarket data...")
-    all_events = []
-    offset = 0
+def _fetch_polymarket_page(offset: int) -> list | None:
+    """
+    Fetch one page from Polymarket.
+    Returns the list of events, an empty list if the page is empty,
+    or None if the API signals end-of-data (422) so the caller can stop.
+    Retries only on transient errors (429, 5xx, timeouts, connection drops).
+    """
     params = {
         "order": "id",
         "ascending": "false",
         "closed": "false",
         "limit": LIMIT,
+        "offset": offset,
     }
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = requests.get(POLY_BASE_URL, params=params, timeout=30)
+
+            # 422 = offset beyond API limit → treat as clean end-of-data
+            if resp.status_code == 422:
+                print(f"  ℹ️  Polymarket: 422 at offset={offset}, stopping pagination.")
+                return None
+
+            resp.raise_for_status()
+            return resp.json()
+
+        except requests.exceptions.HTTPError as err:
+            status = err.response.status_code if err.response is not None else None
+            # Only retry transient server-side errors
+            if status in {429, 500, 502, 503, 504} and attempt < MAX_RETRIES - 1:
+                print(f"  ⚠️  Polymarket attempt {attempt + 1}/{MAX_RETRIES} (HTTP {status}): retrying in 5s…")
+                time.sleep(5)
+                continue
+            raise  # non-transient HTTP error → bubble up immediately
+
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err:
+            if attempt < MAX_RETRIES - 1:
+                print(f"  ⚠️  Polymarket attempt {attempt + 1}/{MAX_RETRIES} ({err}): retrying in 5s…")
+                time.sleep(5)
+                continue
+            raise
+
+    return None  # exhausted retries
+
+
+def fetch_polymarket() -> pd.DataFrame:
+    print("\n📡 Fetching Polymarket data...")
+    all_events: list = []
+    offset = 0
 
     while True:
-        params["offset"] = offset
-        events = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                resp = requests.get(POLY_BASE_URL, params=params, timeout=30)
-                resp.raise_for_status()
-                events = resp.json()
-                if not events:
-                    print(f"  ✅ Polymarket: {len(all_events)} events fetched.")
-                    return pd.DataFrame(all_events)
-                all_events.extend(events)
-                offset += LIMIT
-                time.sleep(DELAY)
-                break
-            except requests.exceptions.RequestException as err:
-                print(f"  ⚠️  Attempt {attempt + 1}/{MAX_RETRIES}: {err}. Retrying in 5s...")
-                time.sleep(5)
+        page = _fetch_polymarket_page(offset)
 
-        if attempt == MAX_RETRIES - 1 and events is None:
-            print("  🛑 Polymarket: giving up after retries.")
+        # None  → 422 end-of-data signal
+        # []    → empty page → done
+        if not page:
             break
 
+        all_events.extend(page)
+
+        # Partial page → last page
+        if len(page) < LIMIT:
+            break
+
+        offset += LIMIT
+        time.sleep(DELAY)
+
+    print(f"  ✅ Polymarket: {len(all_events)} events fetched.")
     return pd.DataFrame(all_events)
 
 
@@ -116,6 +151,7 @@ def fetch_kalshi() -> pd.DataFrame:
     print("\n📡 Fetching Kalshi data...")
     all_events = []
     page_size = 200
+    pages_fetched = 0
 
     def _get_with_retry(url: str) -> dict:
         for attempt in range(MAX_RETRIES):
@@ -129,18 +165,23 @@ def fetch_kalshi() -> pd.DataFrame:
         raise RuntimeError(f"Kalshi API failed after {MAX_RETRIES} retries: {url}")
 
     data = _get_with_retry(
-        f"{KALSHI_BASE_URL}?limit={page_size}&with_nested_markets=true"
+        f"{KALSHI_BASE_URL}?limit={page_size}&with_nested_markets=true&status=open"
     )
     all_events.extend(data.get("events", []))
+    pages_fetched += 1
 
-    while data.get("cursor"):
+    while data.get("cursor") and pages_fetched < KALSHI_MAX_PAGES:
         time.sleep(DELAY)
         data = _get_with_retry(
-            f"{KALSHI_BASE_URL}?cursor={data['cursor']}&limit={page_size}&with_nested_markets=true"
+            f"{KALSHI_BASE_URL}?cursor={data['cursor']}&limit={page_size}&with_nested_markets=true&status=open"
         )
         all_events.extend(data.get("events", []))
+        pages_fetched += 1
 
-    print(f"  ✅ Kalshi: {len(all_events)} events fetched.")
+    if pages_fetched >= KALSHI_MAX_PAGES:
+        print(f"  ⚠️  Kalshi: page limit ({KALSHI_MAX_PAGES}) reached — truncating fetch.")
+
+    print(f"  ✅ Kalshi: {len(all_events)} events fetched ({pages_fetched} pages).")
 
 
     # Flatten nested markets
@@ -280,8 +321,18 @@ def main():
     print("=" * 60)
 
     # 1. Fetch data
-    poly_df           = fetch_polymarket()
-    df_kalshi_filtered = fetch_kalshi()
+    try:
+        poly_df = fetch_polymarket()
+    except Exception as e:
+        raise RuntimeError(f"🛑 Polymarket fetch failed, aborting pipeline: {e}") from e
+
+    if poly_df.empty:
+        raise RuntimeError("🛑 Polymarket returned 0 events — aborting pipeline.")
+
+    try:
+        df_kalshi_filtered = fetch_kalshi()
+    except Exception as e:
+        raise RuntimeError(f"🛑 Kalshi fetch failed, aborting pipeline: {e}") from e
 
     # 2. Save raw data
     print("\n💾 Saving raw data...")
